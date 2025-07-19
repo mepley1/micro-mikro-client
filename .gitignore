@@ -1,0 +1,30 @@
+# Zig build artifacts/cache/etc
+.zig-cache/
+zig-out/
+*.o
+
+# Testing
+test/
+
+# Env/config
+.env
+.env.json
+
+# Certs
+/*-certs
+*.pem
+
+# Editor confs
+.vscode/
+
+# Includes
+.github
+
+# Scratch/temp/misc
+notes.txt
+*.bak*
+*.old*
+*old/
+/*.txt
+scratch/
+_scratch/
