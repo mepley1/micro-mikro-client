@@ -95,7 +95,7 @@ pub fn getConfigPath(alloc: std.mem.Allocator) ![]const u8 {
         conf_dir = std.process.getEnvVarOwned(alloc, "HOME") catch {
             @panic("Error reading envvar.");
         };
-        conf_dir = concatRuntime(u8, alloc, conf_dir, "./config");
+        conf_dir = concatRuntime(u8, alloc, conf_dir, "/.config");
         std.log.debug("Found $HOME", .{});
     } else {
         // Get username and format conf_dir to include it
@@ -116,6 +116,8 @@ pub fn getConfigPath(alloc: std.mem.Allocator) ![]const u8 {
 /// Get current username by calling whoami in a child process. Linux only.
 ///
 /// Caller owns returned slice.
+///
+/// TODO: Return null (optional) on failure, instead of error, then edit calling code to use `... orelse thisFunc()` rather than `... catch thisFunc()`
 fn getUserName(alloc: std.mem.Allocator) ![]const u8 {
     switch (builtin.os.tag) {
         .linux => {
@@ -150,6 +152,7 @@ fn getUserName(alloc: std.mem.Allocator) ![]const u8 {
 }
 
 /// Get username by reading value of $USER envvar.
+/// TODO: Return null on failure, instead of error, then edit the calling code to use ORELSE instead of CATCH.
 fn getUserNameEnv(alloc: std.mem.Allocator) ![]const u8 {
     const env = std.posix.getenv("USER");
     if (env) |u| {
