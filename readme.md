@@ -67,9 +67,14 @@ The RouterOS host's TLS cert must be trusted by the host running the program, ot
 
 ## Examples
 
-Append an address to an __IPv4__ `address-list` named `badips`, timeout 4 hours:
-
+If you have configured your auth string and RouterOS hostname in static config, you only need to pass `-a/--address`:
+```sh
+micro-mikro-client -a 10.20.30.40
 ```
+
+Append an address to an __IPv4__ `address-list` named `badips`, timeout 4 hours, RouterOS host at `192.168.88.1`:
+
+```sh
 micro-mikro-client \
     -a 10.20.30.40 \
     -r 192.168.88.1 \
@@ -81,7 +86,7 @@ micro-mikro-client \
 
 Similar to above, but append to an __IPv6__ `address-list`:
 
-```
+```sh
 micro-mikro-client \
     -6 \
     -a 2001:db8::abcd:1234 \
@@ -93,12 +98,12 @@ micro-mikro-client \
 
 Add own public IP addr to an address list:
 
-```
+```sh
 micro-mikro-client -a $(curl https://ip.mepley.net) --address-list "self-public" -t 4h --comment "Automated" 
 ```
 
 Pass auth str, encoded via bash expansion:
-```
+```sh
 micro-mikro-client -6 -a 2001:db8::bad:add:2 -r 2001:db8::1 -l "example-list" --auth $(echo -n "user:pass" | base64)
 ```
 
@@ -108,10 +113,12 @@ Some options can be configured statically in `$XDG_CONFIG_HOME/micro-mikro-clien
 
 Command line options override static config.
 
-
 # Build
 
 - `zig build -Doptimize=ReleaseFast`
+
+Or, for specific target triples:
+
 - `zig build -Doptimize=ReleaseSmall -Dcpu=znver5 -Dtarget=x86_64-linux-gnu`
 - For Extreme Networks ap3825i (Freescale p1020) running OpenWRT (haven't tested on it yet, but it builds): `zig build -Dtarget=powerpc-linux-musl -Doptimize=ReleaseSmall` (see [since 2015 OpenWRT is based on musl libc](https://ziggit.dev/t/zig-programming-language-as-first-class-citizen/6736/9))
 
@@ -132,6 +139,6 @@ TODO: this
 
 # Contributing
 
-Any pull requests are welcome, but open an issue before putting your time into it. Expect spontaneous breaking changes.
+Any pull requests are welcome, but maybe open an issue before putting your time into it. Expect spontaneous breaking changes.
 
 Search the code for comments beginning with `TODO` or see `TODO.md` to find some low-hanging fruit.
