@@ -149,7 +149,7 @@ pub fn main() !void {
     // If --router and [--auth OR --user] weren't given, read config file.
     const configs: *ConfigData = try alloc.create(ConfigData);
     if ((params.options.router == null) or (params.options.auth == null and params.options.user == null)) {
-        std.log.debug("Getting config...", .{});
+        if (IS_DEBUG) std.log.debug("Getting config...", .{});
         try configs.loadConf(alloc);
     }
     defer alloc.destroy(configs);
@@ -296,6 +296,7 @@ fn setClientProxy(arena: std.mem.Allocator, client: *std.http.Client, proxy: []c
     const a = try std.Uri.parse(proxy);
 
     const proxy_http: *std.http.Client.Proxy = try arena.create(std.http.Client.Proxy);
+    errdefer arena.destroy(proxy_http);
     proxy_http.* = .{
         .protocol = if (std.mem.eql(u8, "http", a.scheme)) .plain else .tls,
         .host = a.host.?.percent_encoded,
@@ -305,6 +306,7 @@ fn setClientProxy(arena: std.mem.Allocator, client: *std.http.Client, proxy: []c
     };
 
     const proxy_https = try arena.create(std.http.Client.Proxy);
+    errdefer arena.destroy(proxy_https);
     proxy_https.* = .{
         .protocol = if (std.mem.eql(u8, "http", a.scheme)) .plain else .tls,
         .host = a.host.?.percent_encoded,
@@ -315,6 +317,8 @@ fn setClientProxy(arena: std.mem.Allocator, client: *std.http.Client, proxy: []c
 
     client.*.http_proxy = proxy_http;
     client.*.https_proxy = proxy_https;
+
+    return;
 }
 
 const DryRunOutput = struct {
@@ -428,14 +432,15 @@ fn readConfigs(alloc: std.mem.Allocator) error{ OutOfMemory, FileTooBig }!Config
             std.log.debug("Found at least one envvar, but not all. Checking config file next...", .{});
         }
     } else {
-        std.log.debug("No envvar config found. Trying conf file ...", .{});
+        if (IS_DEBUG)
+            std.log.debug("No envvar config found. Trying conf file ...", .{});
     }
 
     // If no env var config (or some but not all), then read conf file:
 
     const CONF_FILE_PATH: []const u8 = funcs.getConfigPath(alloc) catch {
-        std.log.warn("Either couldn\'t find XDG env vars, or failed reading. Can't construct config path; skipping reading file, and returning null ConfigData...", .{});
-        return ConfigData{};
+        std.log.warn("Can't construct config path; skipping reading file.", .{});
+        return ConfigData{ .auth = env_auth, .routeros_host = env_router };
     };
     defer alloc.free(CONF_FILE_PATH);
 
