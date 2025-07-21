@@ -29,17 +29,16 @@ Options:
                                      result of `echo -n "user:pass" | base64`). May also be set
                                      via environment variable $MICROMIKRO_AUTH
   -u, --user                       Username of service account on firewall. If this arg is
-                                     specified, a dialog (kdialog) will be spawned to prompt for
-                                     password. Can only be used in an interactive shell on
-                                     graphical target - not scriptable. Recommended to pass
-                                     `--auth` instead.
+                                     specified, a dialog (kdialog or stdin) will be spawned to
+                                     prompt for password. Can only be used in an interactive
+                                     shell - not scriptable. Recommended to pass `--auth` instead.
   -I, --insecure                   Use plaintext http (no tls) (not recommended). Only for
                                      testing; be mindful that without TLS, you'll be sending
                                      RouterOS credentials, with write access to your firewall, in
                                      plaintext across the network. Do not use this option if the
                                      RouterOS host is not link-local. *See RouterOS wiki for help
                                      with certificates.
-  -6, --ipv6                       Address is IPv6. Target IPv6 firewall (i.e. call
+  -6, --ipv6                       Target IPv6 firewall (i.e. call
                                      `/ipv6/firewall/address-list` endpoint as opposed to
                                      `/ip/firewall/address-list`). Use this option if `--address`
                                      is a v6 addr, thought that's not exactly what the option
@@ -47,6 +46,9 @@ Options:
                                      chosen to not detect/choose automatically, in favor of explicitness.
       --dry-run                    Dry run. Don't send request to RouterOS host; instead, print
                                      some info to stderr about what *would* have been sent.
+      --ignore-config              Ignore config - don't read options from config file OR
+                                     environment vars. Mostly for development; CLI args will
+                                     always override config anyways.
       --help                       print help information
       --version                    print version information
 ```
