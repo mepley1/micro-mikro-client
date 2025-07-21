@@ -66,7 +66,7 @@ pub const arg_spec = [_]zli.Arg{
         .type = bool,
     },
 
-    // Auth params
+    // Auth
 
     .{
         .name = .{ .long = .{ .full = "auth", .short = 'e' } },
@@ -75,11 +75,11 @@ pub const arg_spec = [_]zli.Arg{
     },
     .{
         .name = .{ .long = .{ .full = "user", .short = 'u' } },
-        .short_help = "Username of service account on firewall. If this arg is specified, a dialog (kdialog) will be spawned to prompt for password. Can only be used in an interactive shell on graphical target - not scriptable. Recommended to pass `--auth` instead.",
+        .short_help = "Username of service account on firewall. If this arg is specified, a dialog (kdialog or stdin) will be spawned to prompt for password. Can only be used in an interactive shell - not scriptable. Recommended to pass `--auth` instead.",
         .type = []const u8,
     },
 
-    // Bool flags
+    // Misc Bool flags
 
     .{
         .name = .{ .long = .{ .full = "insecure", .short = 'I' } },
@@ -88,7 +88,7 @@ pub const arg_spec = [_]zli.Arg{
     },
     .{
         .name = .{ .long = .{ .full = "ipv6", .short = '6' } },
-        .short_help = "Address is IPv6. Target IPv6 firewall (i.e. call `/ipv6/firewall/address-list` endpoint as opposed to `/ip/firewall/address-list`). Use this option if `--address` is a v6 addr, thought that's not exactly what the option means; the v4 firewall does not accept a v6 addr. I have chosen to not detect/choose automatically, in favor of explicitness.",
+        .short_help = "Target IPv6 firewall (i.e. call `/ipv6/firewall/address-list` endpoint as opposed to `/ip/firewall/address-list`). Use this option if `--address` is a v6 addr, thought that's not exactly what the option means; the v4 firewall does not accept a v6 addr. I have chosen to not detect/choose automatically, in favor of explicitness.",
         .type = bool,
     },
     .{
@@ -96,10 +96,15 @@ pub const arg_spec = [_]zli.Arg{
         .short_help = "Dry run. Don\'t send request to RouterOS host; instead, print some info to stderr about what *would* have been sent.",
         .type = bool,
     },
+    .{
+        .name = .{ .long = .{ .full = "ignore-config" } },
+        .short_help = "Ignore config - don't read options from config file OR environment vars. Mostly for development; CLI args will always override config anyways.",
+        .type = bool,
+    },
 };
 
-/// TODO: Set version before publishing.
-const app_ver = std.SemanticVersion{
+/// TODO: Increment version before publishing any tag/release
+const app_ver: std.SemanticVersion = std.SemanticVersion{
     .major = 0,
     .minor = 0,
     .patch = 0,
@@ -113,7 +118,7 @@ const Cli = zli.CliCommand("micro-mikro-client", .{
 pub fn main() !void {
 
     // Conditionally choose child allocator for arena
-    // TODO: Use fixed buffer allocator for .ReleaseSmall mode
+    // TODO: Use fixed buffer allocator for .ReleaseSmall mode, so I can run it on embedded more conveniently.
     var debug_allocator: ?std.heap.DebugAllocator(.{}) = comptime switch (IS_DEBUG) {
         true => .init,
         false => null,
@@ -146,60 +151,77 @@ pub fn main() !void {
         },
     };
 
-    // If --router and [--auth OR --user] weren't given, read config file.
-    const configs: *ConfigData = try alloc.create(ConfigData);
-    if ((params.options.router == null) or (params.options.auth == null and params.options.user == null)) {
-        if (IS_DEBUG) std.log.debug("Getting config...", .{});
-        try configs.loadConf(alloc);
+    // If --router and [--auth OR --user] weren't both given, read static config. (or skip if --ignore-config)
+    var configs: *ConfigData = try alloc.create(ConfigData);
+    configs.* = ConfigData{};
+    if (!params.options.@"ignore-config") {
+        @branchHint(.likely);
+        if ((params.options.router == null) or (params.options.auth == null and params.options.user == null)) {
+            if (IS_DEBUG) std.log.debug("Getting config...", .{});
+            try configs.readFile(alloc);
+            try configs.readEnv(alloc); // environment variables take precedence
+        }
+    } else {
+        @branchHint(.unlikely);
+        if (IS_DEBUG) std.log.debug("Option: --ignore-config.", .{});
     }
-    defer alloc.destroy(configs);
+    defer {
+        configs.cleanup(alloc);
+        alloc.destroy(configs);
+    }
 
     // Validate + consolidate params
-    const cl_options = try validateParams(alloc, params);
+    const validated_params = try validateParams(alloc, params);
 
     // Construct endpoint URI
-    const router_addr: []const u8 = cl_options.router orelse configs.*.routeros_host orelse {
+    const router_addr: []const u8 = validated_params.router orelse configs.*.routeros_host orelse {
         @branchHint(.unlikely);
-        std.log.err("missing value for parameter -r/--router (RouterOS host address)", .{});
+        std.log.err("Missing value for parameter -r/--router", .{});
         return error.MissingRouterAddr;
     };
     const scheme_modifier: []const u8 = if (params.options.insecure) "" else "s"; // Use TLS by default
     const ip_ver_modifier: []const u8 = if (params.options.ipv6) "v6" else ""; // If v6, use `/ipv6/firewall` endpoint
 
-    var buf_url: [128]u8 = undefined;
-    const url_full: []const u8 = try std.fmt.bufPrint(&buf_url, "http{s}://{s}:{d}/rest/ip{s}/firewall/address-list", .{ scheme_modifier, router_addr, cl_options.port.?, ip_ver_modifier });
+    var buf_url: [256]u8 = undefined;
+    const url_full: []const u8 = try std.fmt.bufPrint(&buf_url, "http{s}://{s}:{d}/rest/ip{s}/firewall/address-list", .{ scheme_modifier, router_addr, validated_params.port.?, ip_ver_modifier });
     const uri = std.Uri.parse(url_full) catch {
         std.log.err("Attempted to parse invalid Uri - Probably invalid value for -r/--router", .{});
         return error.InvalidHostname;
     };
 
     // Set auth to passed value first, if null then fall back to config. (--user -> --auth -> config)
-    var auth_raw = cl_options.ubuf orelse params.options.auth orelse configs.*.auth;
+    var auth_raw: ?[]const u8 = validated_params.ubuf orelse params.options.auth orelse configs.*.auth orelse null;
+    var auth_raw_needs_freed: bool = false;
     if (auth_raw) |val| {
         if (val.len > 4096) {
             std.log.err("Auth str too long (over 4KiB). You're doing too much!.", .{});
             return error.BadValue;
         }
-        // If value looks like it's not b64, then encode it, in case user passes an un-encoded auth string, or for whatever other reason we end up with un-encoded data at this point.
+        // If value doesn't look like base64, encode it.
         if (!validation.validateB64(val)) {
             std.log.debug("Auth str appears to be un-encoded. Encoding...", .{});
             auth_raw = try b64.b64EncodeAlloc(alloc, val);
+            auth_raw_needs_freed = true;
         }
     } else {
         std.log.err("No auth string given! Must either pass as arg (--auth) or configure in ~/.config/.env.json", .{});
         return error.MissingCredentials;
     }
+    defer if (auth_raw_needs_freed) {
+        alloc.free(auth_raw.?);
+        auth_raw_needs_freed = false;
+    };
 
-    const http_basic_auth: []const u8 = try std.fmt.allocPrint(alloc, "Basic {?s}", .{auth_raw});
+    const http_basic_auth: []const u8 = if (auth_raw) |val| funcs.concatRuntime(u8, alloc, "Basic ", val) else return error.DetectableIllegalUndefinedBehavior; //Should have errored by now if not given.
     defer alloc.free(http_basic_auth);
 
     // Set any additional PAYLOAD params here - all except .address have defaults
     var payload_items = Payload{
-        .address = cl_options.bad_ip,
+        .address = validated_params.bad_ip,
     };
-    if (cl_options.comment) |v| payload_items.comment = v;
-    if (cl_options.timeout) |v| payload_items.timeout = v;
-    if (cl_options.addr_list) |v| payload_items.list = v;
+    if (validated_params.comment) |v| payload_items.comment = v;
+    if (validated_params.timeout) |v| payload_items.timeout = v;
+    if (validated_params.addr_list) |v| payload_items.list = v;
 
     // Jsonify payload (method 1 - heap alloc)
     // const payload = try std.json.stringifyAlloc(alloc, payload_items, .{});
@@ -394,109 +416,93 @@ const ApiResponse = struct {
     detail: ?[]const u8 = null,
 };
 
-/// Read config, return values.
-/// Linux only.
-///
-/// Try env vars first; if not, then try to read from config file.
-///
-/// TODO: Move this to be a member of `ConfigData` struct, i.e. `ConfigData.loadConf()`
-///
-/// TODO: Add cl option (bool --skip-config) to skip reading config
-fn readConfigs(alloc: std.mem.Allocator) error{ OutOfMemory, FileTooBig }!ConfigData {
-    if (IS_DEBUG) {
-        std.log.debug("Checking for config in environment variables ...", .{});
-    }
-    var env_auth: ?[]const u8 = null;
-    var env_router: ?[]const u8 = null;
-    var partial_env_conf: bool = false;
-
-    // TODO: To avoid setting and re-setting values, Use a mutable ConfigData that's initialized first before doing these, and then set the values if each env config is found?
-    // Then when config file is read, only set each value if still null. We can also return that partial ConfigData instead of a blank one in case of errors.
-
-    if (std.process.hasNonEmptyEnvVarConstant("MICROMIKRO_AUTH")) {
-        env_auth = std.process.getEnvVarOwned(alloc, "MICROMIKRO_AUTH") catch null;
-    }
-    if (std.process.hasNonEmptyEnvVarConstant("MICROMIKRO_FIREWALL")) {
-        env_router = std.process.getEnvVarOwned(alloc, "MICROMIKRO_FIREWALL") catch null;
-    }
-
-    if ((env_auth != null) and (env_router != null)) {
-        if (IS_DEBUG) {
-            std.log.debug("Found config in env vars, using retrieved values.", .{});
-        }
-        return ConfigData{ .auth = env_auth.?, .routeros_host = env_router.? };
-    } else if ((env_auth != null) or (env_router != null)) {
-        @branchHint(.unlikely);
-        partial_env_conf = true;
-        if (IS_DEBUG) {
-            std.log.debug("Found at least one envvar, but not all. Checking config file next...", .{});
-        }
-    } else {
-        if (IS_DEBUG)
-            std.log.debug("No envvar config found. Trying conf file ...", .{});
-    }
-
-    // If no env var config (or some but not all), then read conf file:
-
-    const CONF_FILE_PATH: []const u8 = funcs.getConfigPath(alloc) catch {
-        std.log.warn("Can't construct config path; skipping reading file.", .{});
-        return ConfigData{ .auth = env_auth, .routeros_host = env_router };
-    };
-    defer alloc.free(CONF_FILE_PATH);
-
-    const handle = std.fs.openFileAbsolute(CONF_FILE_PATH, .{
-        .mode = .read_only,
-        .lock = .exclusive,
-    }) catch |err| {
-        std.log.debug("Config file not found, or error opening it: {}", .{err});
-        return ConfigData{};
-    };
-    defer handle.close();
-    if (IS_DEBUG) {
-        std.log.debug("Found config file at {s}. Parsing...", .{CONF_FILE_PATH});
-    }
-
-    // Read + parse file contents
-    const conf_file_data = handle.readToEndAlloc(alloc, 2048) catch undefined;
-    errdefer alloc.free(conf_file_data);
-
-    var parsed: ConfigData = std.json.parseFromSliceLeaky(ConfigData, alloc, conf_file_data, .{
-        .ignore_unknown_fields = true,
-    }) catch {
-        std.log.err("Failed parsing config! Ensure file contains valid JSON + valid values.", .{});
-        return ConfigData{};
-    };
-
-    // If only *some* config envvars were found earlier, then use their values now.
-    // TODO: Do this a neater way
-    if (partial_env_conf) {
-        if (env_auth) |val| parsed.auth = val;
-        if (env_router) |val| parsed.routeros_host = val;
-    }
-
-    return parsed;
-}
-
-/// Contains program config values, as read from conf file.
+/// Contains program config values, as read from conf file/environment
 const ConfigData = struct {
     auth: ?[]const u8 = null,
     routeros_host: ?[]const u8 = null,
 
     const Self = @This();
 
-    // /// Not needed if using arena, but I prefer explicitness.
-    // fn deinit(self: *Self, alloc: std.mem.Allocator) void {
-    //     if (self.auth != null) {
-    //         alloc.free(self.auth.?);
-    //     }
-    //     if (self.routeros_host != null) {
-    //         alloc.free(self.routeros_host.?);
-    //     }
-    // }
+    /// Not needed if using arena, but I prefer explicitness.
+    /// TODO: Ensure each value is a result of an allocation that actually needs freed.
+    fn cleanup(self: *Self, alloc: std.mem.Allocator) void {
+        if (self.auth != null) {
+            alloc.free(self.auth.?);
+        }
+        if (self.routeros_host != null) {
+            alloc.free(self.routeros_host.?);
+        }
+    }
 
-    /// See `readConfigs()`
-    fn loadConf(self: *Self, alloc: std.mem.Allocator) !void {
-        self.* = try readConfigs(alloc);
+    /// Read config from environment variables.
+    fn readEnv(self: *Self, alloc: std.mem.Allocator) error{ OutOfMemory, EnvironmentVariableNotFound, InvalidWtf8 }!void {
+        if (IS_DEBUG) std.log.debug("Checking for config in environment variables ...", .{});
+
+        // Names of envvars
+        const envvar_auth: []const u8 = "MICROMIKRO_AUTH";
+        const envvar_router: []const u8 = "MICROMIKRO_FIREWALL";
+
+        if (std.process.hasNonEmptyEnvVarConstant(envvar_auth)) {
+            self.*.auth = try std.process.getEnvVarOwned(alloc, envvar_auth);
+        }
+        if (std.process.hasNonEmptyEnvVarConstant(envvar_router)) {
+            self.routeros_host = try std.process.getEnvVarOwned(alloc, envvar_router);
+        }
+
+        return;
+    }
+
+    /// Read and parse config file, then set self's attrs.
+    fn readFile(self: *Self, alloc: std.mem.Allocator) !void {
+        if (IS_DEBUG) std.log.debug("Loading config from file ...", .{});
+
+        const CONF_FILE_PATH: []const u8 = try funcs.getConfigPath(alloc);
+        defer alloc.free(CONF_FILE_PATH);
+
+        if (IS_DEBUG) std.log.debug("CONF_FILE_PATH: {s}", .{CONF_FILE_PATH});
+
+        const handle = std.fs.openFileAbsolute(CONF_FILE_PATH, .{
+            .mode = .read_only,
+        }) catch |err| {
+            switch (err) {
+                error.FileNotFound => {
+                    std.log.debug("Config file not found.", .{});
+                    return;
+                },
+                else => {
+                    std.log.err("Failure opening config file: {}", .{err});
+                    return err;
+                },
+            }
+        };
+        defer handle.close();
+
+        const conf_file_data: ?[]u8 = handle.readToEndAlloc(alloc, 2048) catch |err| {
+            std.log.err("Failure reading config file: {}", .{err});
+            return err;
+        };
+        defer alloc.free(conf_file_data.?);
+
+        const parsed: *ConfigData = try alloc.create(ConfigData);
+        parsed.* = ConfigData{};
+
+        parsed.* = std.json.parseFromSliceLeaky(ConfigData, alloc, conf_file_data.?, .{
+            .ignore_unknown_fields = true,
+            .duplicate_field_behavior = .use_last,
+            // .allocate = .alloc_always,
+        }) catch |err| {
+            std.log.err("Failed parsing config! Ensure file contains valid JSON + valid values.", .{});
+            return err;
+        };
+        defer {
+            parsed.cleanup(alloc);
+            alloc.destroy(parsed);
+        }
+
+        if (parsed.auth) |val| self.auth = try alloc.dupe(u8, val);
+        if (parsed.routeros_host) |val| self.routeros_host = try alloc.dupe(u8, val);
+
+        return;
     }
 };
 
@@ -611,6 +617,7 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
     }
 
     // Username, for interactive auth
+    // TODO: Check RouterOS wiki for max user length
     var ubuf: ?[]const u8 = null;
     if (params.options.user) |v| {
         if ((!validation.isAsciiPrintable(v)) or v.len > 512) {
@@ -626,18 +633,21 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
 
     // Port
     // Not much to do here, a bad value won't get past initial zli parsing.
-    // If not given, default to 443. If --insecure, then 80.
+    // If not given, default to 443; if --insecure, then 80.
     var port: ?u16 = null;
-    if (params.options.port) |n| {
-        port = n;
+    if (params.options.port) |v| {
+        port = v;
     } else {
-        if (!params.options.insecure) {
-            @branchHint(.likely);
-            port = 443;
-        } else {
-            @branchHint(.unlikely);
-            port = 80;
-        }
+        port = switch (params.options.insecure) {
+            false => blk: {
+                @branchHint(.likely);
+                break :blk 443;
+            },
+            true => blk: {
+                @branchHint(.unlikely);
+                break :blk 80;
+            },
+        };
     }
 
     return Options{
@@ -658,56 +668,54 @@ test "ConfigData optionals" {
     try std.testing.expect(x.auth == null and x.routeros_host == null);
 }
 
-test "ConfigData.loadConf" {
+test "ConfigData allocated" {
+    const x: *ConfigData = try std.testing.allocator.create(ConfigData);
+    defer std.testing.allocator.destroy(x);
+    x.* = ConfigData{};
+    try std.testing.expect(x.auth == null and x.routeros_host == null);
+}
+
+test "ConfigData.readFile + .readEnv" {
+    std.testing.log_level = .debug;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
 
     const configs = try alloc.create(ConfigData);
     defer alloc.destroy(configs);
-    try configs.loadConf(alloc);
 
-    // NOTE: Will fail if config file doesn't exist
+    // Test `.readFile()` first
+    try configs.readFile(alloc);
+
+    // These 3 will pass with any valid configs.
     try std.testing.expect(configs.auth != null);
     try std.testing.expect(configs.routeros_host != null);
     try std.testing.expect(std.mem.containsAtLeastScalar(u8, configs.routeros_host.?, 1, '.'));
-}
+    // These depend on default configs.
+    try std.testing.expectEqualSlices(u8, "dXNlcjpwdw==", configs.auth.?);
+    try std.testing.expectEqualStrings("router.lan", configs.routeros_host.?);
 
-// TODO: Functionally a duplicate of previous test - remove once `readConfigs()` has been moved to `ConfigData` namespace.
-test "readConfigs" {
-    std.testing.log_level = .debug;
+    // Now test .readEnv()
+    try configs.readEnv(alloc);
 
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    const configs = try readConfigs(alloc);
-
-    // NOTE: If config file IS found, these should pass:
+    // These 3 should pass with *any* valid configs.
     try std.testing.expect(configs.auth != null);
     try std.testing.expect(configs.routeros_host != null);
     try std.testing.expect(std.mem.containsAtLeastScalar(u8, configs.routeros_host.?, 1, '.'));
+    // These depend on default config. (.env.json.default)
+    try std.testing.expectEqualStrings("dXNlcjpwdw==", configs.auth.?);
+    try std.testing.expectEqualSlices(u8, "router.lan", configs.routeros_host.?);
 }
 
-test "jsonify Payload - buffer" {
-    std.testing.log_level = .debug;
-    const payload_items = Payload{ .address = "10.69.69.69" };
-    var test_buf: [1024]u8 = undefined;
-    var buf_writer = std.io.fixedBufferStream(&test_buf);
-    try std.json.stringify(payload_items, .{}, buf_writer.writer());
-    const payload: []const u8 = buf_writer.getWritten();
-
-    // Get payload.len in case I change defaults:
-    // std.debug.print("\n\npayload len: {d}\n\n", .{payload.len});
-
-    try std.testing.expect(payload.len == 70); // based on Payload defaults
-}
-
-test "jsonify Payload - ArrayList" {
+test "Payload" {
     const payload_items = Payload{ .address = "10.69.69.69" };
     var string = std.ArrayList(u8).init(std.testing.allocator);
     defer string.deinit();
     try std.json.stringify(payload_items, .{}, string.writer()); //This makes `string` the payload.
     const payload = string.items;
+
+    // Get payload.len in case I change defaults:
+    // std.debug.print("\n\npayload len: {d}\n\n", .{payload.len});
+
     try std.testing.expect(payload.len == 70);
 }
