@@ -676,6 +676,8 @@ test "ConfigData allocated" {
 }
 
 test "ConfigData.readFile + .readEnv" {
+    // Run this test via `unit_test_config.sh` if default config doesn't exist.
+
     std.testing.log_level = .debug;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
