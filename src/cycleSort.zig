@@ -51,7 +51,7 @@ pub fn cycleSort(comptime T: type, arr: []T) void {
 }
 
 test "cycleSort" {
-    var arr = [_]u8{ 3, 2, 4, 1, 0 };
+    var arr = [_]u8{ 3, 64, 2, 4, 1, 0x00, 0b11111111 };
     cycleSort(u8, &arr);
-    try std.testing.expectEqual([5]u8{ 0, 1, 2, 3, 4 }, arr);
+    try std.testing.expectEqualSlices(u8, &[7]u8{ 0, 1, 2, 3, 4, 64, 255 }, &arr);
 }

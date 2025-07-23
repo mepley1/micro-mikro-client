@@ -71,7 +71,7 @@ pub inline fn b64Encode(input: []const u8, buf: []u8) ![]const u8 {
 }
 
 /// Return decoded copy of input_str. Caller must free returned slice.
-fn b64DecodeAlloc(alloc: std.mem.Allocator, input_str: []u8) ![]u8 {
+fn b64DecodeAlloc(alloc: std.mem.Allocator, input_str: []const u8) ![]u8 {
     var decoded = try alloc.alloc(u8, (input_str.len / 4 + 1) * 3);
     defer alloc.free(decoded);
 
@@ -98,37 +98,26 @@ fn b64DecodeAlloc(alloc: std.mem.Allocator, input_str: []u8) ![]u8 {
 test "b64Encode" {
     const str: []const u8 = "zig";
 
-    const enc: []const u8 = try b64EncodeAlloc(std.testing.allocator, str);
-    defer std.testing.allocator.free(enc);
-    try std.testing.expectEqualStrings("emln", enc);
-
     var buf: [16]u8 = undefined;
-    const enc_b: []const u8 = try b64Encode(str, &buf);
-    try std.testing.expectEqualStrings("emln", enc_b);
+    const enc: []const u8 = try b64Encode(str, &buf);
+    try std.testing.expectEqualStrings("emln", enc);
 }
 
 test "b64EncodeAlloc" {
-    std.testing.log_level = .debug;
-    const alloc = std.testing.allocator;
-    var str: []const u8 = "abcd";
-    str = try b64EncodeAlloc(alloc, str);
-    defer alloc.free(str);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    const alloc = arena.allocator();
+    defer _ = arena.deinit();
 
-    try std.testing.expect(str.len % 4 == 0);
-    try std.testing.expectEqualSlices(u8, "YWJjZA==", str);
+    try std.testing.expectEqualSlices(u8, "YWJjZA==", try b64EncodeAlloc(alloc, "abcd"));
+    try std.testing.expectEqualStrings("emln", try b64EncodeAlloc(alloc, "zig"));
+    try std.testing.expectEqualStrings("TG9yZW0gSXBzdW0u", try b64EncodeAlloc(alloc, "Lorem Ipsum."));
 }
 
 test "b64DecodeAlloc" {
-    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    const alloc = arena.allocator();
+    defer _ = arena.deinit();
 
-    const str: []const u8 = "zig";
-    const enc: []u8 = try b64EncodeAlloc(alloc, str);
-    defer alloc.free(enc);
-
-    try std.testing.expectEqualStrings("emln", enc);
-
-    const dec = try b64DecodeAlloc(alloc, enc);
-    defer alloc.free(dec);
-
-    try std.testing.expectEqualStrings("zig", dec);
+    try std.testing.expectEqualSlices(u8, "zig", try b64DecodeAlloc(alloc, "emln"));
+    try std.testing.expectEqualSlices(u8, "Lorem Ipsum.", try b64DecodeAlloc(alloc, "TG9yZW0gSXBzdW0u"));
 }

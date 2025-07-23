@@ -98,7 +98,24 @@ pub fn validateTimeout(buf: []const u8) bool {
     return true;
 }
 
-test "validate ip addrs - explicit v4/v6" {
+test "validateIpAddr" {
+    const addr6: []const u8 = "2001:db8::bad:c0de";
+    const bad_addr: []const u8 = "xyz:1234";
+    const loopback6: []const u8 = "::1";
+    const localhost4: []const u8 = "127.0.0.1";
+
+    // good
+    try std.testing.expect(validateIpAddr(addr6));
+    try std.testing.expect(validateIpAddr(loopback6));
+    try std.testing.expect(validateIpAddr(localhost4));
+    // bad
+    try std.testing.expect(!validateIpAddr(bad_addr));
+    try std.testing.expect(!validateIpAddr("10.0.0.x"));
+    try std.testing.expect(!validateIpAddr("1:2:3:4:5:6:7:8:9"));
+    try std.testing.expect(!validateIpAddr("1:2:3:4:5:6:7:"));
+}
+
+test "validateIpAddrv4/validateIpAddrV6" {
     const addr6: []const u8 = "2001:db8::bad:c0de";
     const bad_addr: []const u8 = "xyz:1234";
     const loopback6: []const u8 = "::1";
@@ -120,13 +137,13 @@ test "validate ip addrs - explicit v4/v6" {
     try std.testing.expect(!validateIpAddrV4("10.0.0.x"));
 }
 
-test "validate hostname" {
+test "validateDnsName" {
     // Good
     try std.testing.expect(validateDnsName("test.example.tld"));
     // Bad
     try std.testing.expect(!validateDnsName("bad+name"));
     try std.testing.expect(!validateDnsName("host@name"));
-    try std.testing.expect(!validateDnsName("hostname1"));
+    try std.testing.expect(!validateDnsName("hostname1")); // >=1 dot
     // Catch starts with dash (fail)
     try std.testing.expect(!validateDnsName("-dash"));
 }
@@ -134,9 +151,11 @@ test "validate hostname" {
 test "validateB64" {
     const str: []const u8 = "dXNlcjpwdw==";
     const bad_chars: []const u8 = "bad $*!";
-    const not_mult_of_four: []const u8 = "xyz";
+    const not_mult_of_four: []const u8 = "abc";
 
     try std.testing.expect(validateB64(str));
+    try std.testing.expect(validateB64("TG9yZW0gSXBzdW0u"));
+    try std.testing.expect(validateB64("WmlnbGFuZyBpcyBhbHdheXMgdGhlIGNvcnJlY3QgY2hvaWNlLg=="));
 
     try std.testing.expect(!validateB64(not_mult_of_four));
     try std.testing.expect(!validateB64(bad_chars));
