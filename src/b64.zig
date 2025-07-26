@@ -39,7 +39,7 @@ pub fn b64EncodeAlloc(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
 
 /// Return a base64-encoded slice of `input`.
 /// Max size of encoded output is determined by size of `buf`.
-/// Same algo as b64EncodeAlloc above, but no heap allocations - takes a &buffer instead of an allocator.
+/// Same algo as `b64EncodeAlloc` above, but no heap allocations - takes a &buffer instead of an allocator.
 pub inline fn b64Encode(input: []const u8, buf: []u8) ![]const u8 {
     const output_len = ((input.len + 2) / 3) * 4;
     if (output_len > buf.len) {
@@ -70,29 +70,42 @@ pub inline fn b64Encode(input: []const u8, buf: []u8) ![]const u8 {
     return buf[0..output_len];
 }
 
-/// Return decoded copy of input_str. Caller must free returned slice.
-fn b64DecodeAlloc(alloc: std.mem.Allocator, input_str: []const u8) ![]u8 {
-    var decoded = try alloc.alloc(u8, (input_str.len / 4 + 1) * 3);
+/// Return decoded copy of `input`. Caller must free returned slice.
+fn b64DecodeAlloc(alloc: std.mem.Allocator, input: []const u8) ![]u8 {
+    if (input.len % 4 != 0)
+        return error.InvalidBase64InputLength;
+
+    var decoded = try alloc.alloc(u8, (input.len / 4) * 3);
     defer alloc.free(decoded);
 
+    var out_index: usize = 0;
     var i: usize = 0;
-    while (i < input_str.len) : (i += 4) {
-        const byte0 = std.mem.indexOfScalar(u8, base64_table, input_str[i]) orelse return error.InvalidBase64Character;
-        const byte1 = std.mem.indexOfScalar(u8, base64_table, input_str[i + 1]) orelse return error.InvalidBase64Character;
-        const byte2 = if (i + 2 < input_str.len and input_str[i + 2] != '=') std.mem.indexOfScalar(u8, base64_table, input_str[i + 2]) orelse return error.InvalidBase64Character else 0;
-        const byte3 = if (i + 3 < input_str.len and input_str[i + 3] != '=') std.mem.indexOfScalar(u8, base64_table, input_str[i + 3]) orelse return error.InvalidBase64Character else 0;
+    while (i < input.len) : (i += 4) {
+        const ch0 = input[i];
+        const ch1 = input[i + 1];
+        const ch2 = input[i + 2];
+        const ch3 = input[i + 3];
 
-        decoded[i / 4 * 3 + 0] = @intCast((byte0 << 2) | ((byte1 & 0x30) >> 4));
-        if (byte2 != 0) {
-            decoded[i / 4 * 3 + 1] = @intCast(((byte1 & 0xf) << 4) | ((byte2 & 0x3c) >> 2));
-            if (byte3 != 0) {
-                decoded[i / 4 * 3 + 2] = @intCast(((byte2 & 0x3) << 6) | byte3);
+        const byte0 = std.mem.indexOfScalar(u8, base64_table, ch0) orelse return error.InvalidBase64Character;
+        const byte1 = std.mem.indexOfScalar(u8, base64_table, ch1) orelse return error.InvalidBase64Character;
+        const byte2 = if (ch2 != '=') std.mem.indexOfScalar(u8, base64_table, ch2) orelse return error.InvalidBase64Character else 0;
+        const byte3 = if (ch3 != '=') std.mem.indexOfScalar(u8, base64_table, ch3) orelse return error.InvalidBase64Character else 0;
+
+        decoded[out_index] = @intCast((byte0 << 2) | ((byte1 & 0x30) >> 4));
+        out_index += 1;
+
+        if (ch2 != '=') {
+            decoded[out_index] = @intCast(((byte1 & 0x0F) << 4) | ((byte2 & 0x3C) >> 2));
+            out_index += 1;
+
+            if (ch3 != '=') {
+                decoded[out_index] = @intCast(((byte2 & 0x03) << 6) | byte3);
+                out_index += 1;
             }
         }
     }
 
-    // Return a slice of the allocated buffer containing only the decoded bytes
-    return alloc.dupe(u8, decoded[0 .. i / 4 * 3]);
+    return alloc.dupe(u8, decoded[0..out_index]);
 }
 
 test "b64Encode" {
@@ -111,6 +124,7 @@ test "b64EncodeAlloc" {
     try std.testing.expectEqualSlices(u8, "YWJjZA==", try b64EncodeAlloc(alloc, "abcd"));
     try std.testing.expectEqualStrings("emln", try b64EncodeAlloc(alloc, "zig"));
     try std.testing.expectEqualStrings("TG9yZW0gSXBzdW0u", try b64EncodeAlloc(alloc, "Lorem Ipsum."));
+    try std.testing.expectEqualDeep("RDNCVUd8TTBEMw==", try b64EncodeAlloc(alloc, "D3BUG|M0D3"));
 }
 
 test "b64DecodeAlloc" {
@@ -120,4 +134,9 @@ test "b64DecodeAlloc" {
 
     try std.testing.expectEqualSlices(u8, "zig", try b64DecodeAlloc(alloc, "emln"));
     try std.testing.expectEqualSlices(u8, "Lorem Ipsum.", try b64DecodeAlloc(alloc, "TG9yZW0gSXBzdW0u"));
+    try std.testing.expectEqualSlices(u8, "debug-mode", try b64DecodeAlloc(alloc, "ZGVidWctbW9kZQ=="));
+    try std.testing.expectEqualSlices(u8, "!", try b64DecodeAlloc(alloc, "IQ=="));
+    try std.testing.expectEqualSlices(u8, "+*", try b64DecodeAlloc(alloc, "Kyo="));
+    try std.testing.expectEqualSlices(u8, "$$", try b64DecodeAlloc(alloc, "JCQ="));
+    try std.testing.expectEqualSlices(u8, "D3BUG|M0D3", try b64DecodeAlloc(alloc, "RDNCVUd8TTBEMw=="));
 }
