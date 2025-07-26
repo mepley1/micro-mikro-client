@@ -5,6 +5,7 @@ zig-out/
 
 # Testing
 test/
+massif.out.*
 
 # Env/config
 .env
