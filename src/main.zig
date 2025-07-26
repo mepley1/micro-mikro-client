@@ -176,7 +176,7 @@ pub fn main() !void {
     }
 
     // Check that all required params (or config) were given.
-    if (!try check_reqd_args(params, configs)) {
+    if (!try checkReqdArgs(params, configs)) {
         std.log.err("Missing one of: --address, --router, --auth", .{});
         try Cli.printHelp();
     }
@@ -548,7 +548,7 @@ const Options = struct {
 const InvalidIpAddr = error{ InvalidIpAddrV4, InvalidIpAddrV6 };
 
 /// Verify all required args were given; if any one missing, return `false`.
-fn check_reqd_args(params: anytype, configs: *ConfigData) !bool {
+fn checkReqdArgs(params: anytype, configs: *ConfigData) !bool {
     const x_addr = params.options.address != null;
     const x_router = params.options.router != null or configs.*.routeros_host != null;
     const x_auth = params.options.auth != null or configs.*.auth != null;
