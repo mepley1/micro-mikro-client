@@ -29,7 +29,7 @@ pub const arg_spec = [_]zli.Arg{
     },
     .{
         .name = .{ .long = .{ .full = "router", .short = 'r' } },
-        .short_help = "(REQUIRED) Firewall/router hostname or IP. May also be set via environment variable $MICROMIKRO_FIREWALL",
+        .short_help = "(REQUIRED*) Firewall/router hostname or IP. May also be set via environment variable $MICROMIKRO_FIREWALL",
         .type = []const u8,
     },
     .{
@@ -45,6 +45,19 @@ pub const arg_spec = [_]zli.Arg{
     .{
         .name = .{ .long = .{ .full = "timeout", .short = 't' } },
         .short_help = "Timeout - i.e. 4h or 00:04:00 (default: 4h)",
+        .type = []const u8,
+    },
+
+    // Auth
+
+    .{
+        .name = .{ .long = .{ .full = "auth", .short = 'e' } },
+        .short_help = "(REQUIRED*) Base64-encoded http basic auth string (i.e. result of `echo -n \"user:pass\" | base64`). May also be set via environment variable $MICROMIKRO_AUTH",
+        .type = []const u8,
+    },
+    .{
+        .name = .{ .long = .{ .full = "user", .short = 'u' } },
+        .short_help = "Username of service account on firewall. If this arg is specified, a dialog (kdialog or stdin) will be spawned to prompt for password. Can only be used in an interactive shell - not scriptable. Recommended to pass `--auth` instead.",
         .type = []const u8,
     },
 
@@ -64,19 +77,6 @@ pub const arg_spec = [_]zli.Arg{
         .name = .{ .long = .{ .full = "ignore-system-proxy", .short = 'P' } },
         .short_help = "Ignore $HTTP_PROXY/$HTTPS_PROXY environment variables. Might be useful for testing or odd networks.",
         .type = bool,
-    },
-
-    // Auth
-
-    .{
-        .name = .{ .long = .{ .full = "auth", .short = 'e' } },
-        .short_help = "(REQUIRED*) Base64-encoded http basic auth string (i.e. result of `echo -n \"user:pass\" | base64`). May also be set via environment variable $MICROMIKRO_AUTH",
-        .type = []const u8,
-    },
-    .{
-        .name = .{ .long = .{ .full = "user", .short = 'u' } },
-        .short_help = "Username of service account on firewall. If this arg is specified, a dialog (kdialog or stdin) will be spawned to prompt for password. Can only be used in an interactive shell - not scriptable. Recommended to pass `--auth` instead.",
-        .type = []const u8,
     },
 
     // Misc Bool flags
@@ -99,6 +99,11 @@ pub const arg_spec = [_]zli.Arg{
     .{
         .name = .{ .long = .{ .full = "ignore-config" } },
         .short_help = "Ignore config - don't read options from config file OR environment vars. Mostly for development; CLI args will always override config anyways.",
+        .type = bool,
+    },
+    .{
+        .name = .{ .long = .{ .full = "no-newline" } },
+        .short_help = "Don't append trailing newline to output. May be useful in scripts.",
         .type = bool,
     },
 };
@@ -170,6 +175,12 @@ pub fn main() !void {
         alloc.destroy(configs);
     }
 
+    // Check that all required params (or config) were given.
+    if (!try check_reqd_args(params, configs)) {
+        std.log.err("Missing one of: --address, --router, --auth", .{});
+        try Cli.printHelp();
+    }
+
     // Validate + consolidate params
     const validated_params = try validateParams(alloc, params);
 
@@ -212,7 +223,11 @@ pub fn main() !void {
         auth_raw_needs_freed = false;
     };
 
-    const http_basic_auth: []const u8 = if (auth_raw) |val| funcs.concatRuntime(u8, alloc, "Basic ", val) else return error.DetectableIllegalUndefinedBehavior; //Should have errored by now if not given.
+    const http_basic_auth: []const u8 = if (auth_raw) |val| funcs.concatRuntime(alloc, u8, "Basic ", val) else {
+        // return error.DetectedUndefinedBehavior;
+        unreachable; //Should have already errored by now if not given.
+
+    };
     defer alloc.free(http_basic_auth);
 
     // Set any additional PAYLOAD params here - all except .address have defaults
@@ -223,15 +238,21 @@ pub fn main() !void {
     if (validated_params.timeout) |v| payload_items.timeout = v;
     if (validated_params.addr_list) |v| payload_items.list = v;
 
+    const json_options: std.json.StringifyOptions = .{ .emit_null_optional_fields = false, .whitespace = .minified };
+
     // Jsonify payload (method 1 - heap alloc)
-    // const payload = try std.json.stringifyAlloc(alloc, payload_items, .{});
+    // const payload = try std.json.stringifyAlloc(alloc, payload_items, json_options);
     // defer alloc.free(payload);
 
     // JSONify (method 2 - stack buffer)
     var payload_buf: [512]u8 = undefined;
     var payload_stream = std.io.fixedBufferStream(&payload_buf);
-    try std.json.stringify(payload_items, .{ .emit_null_optional_fields = false, .whitespace = .minified }, payload_stream.writer());
+    try std.json.stringify(payload_items, json_options, payload_stream.writer());
     const payload: []const u8 = payload_stream.getWritten();
+
+    if (IS_DEBUG) {
+        std.log.debug("payload length: {d} B", .{payload.len});
+    }
 
     var client = std.http.Client{ .allocator = alloc };
     defer client.deinit();
@@ -264,7 +285,7 @@ pub fn main() !void {
         .keep_alive = false,
     };
 
-    // Open connection and send request, or if --dry-run, don't.
+    // Open connection + send request (or if --dry-run, don't), and print resulting ID to stdout.
     switch (params.options.@"dry-run") {
         false => {
             @branchHint(.likely);
@@ -283,7 +304,11 @@ pub fn main() !void {
 
             if (result) |res| {
                 defer alloc.free(result.?);
-                try std.io.getStdOut().writer().writeAll(res);
+                const out = switch (params.options.@"no-newline") {
+                    true => res,
+                    false => funcs.concatRuntime(alloc, u8, res, "\n"),
+                };
+                try std.io.getStdOut().writer().writeAll(out);
             } else {
                 std.log.debug("No entry created.", .{});
             }
@@ -305,7 +330,7 @@ pub fn main() !void {
     return;
 }
 
-/// Set value of `client.http_proxy` and `client.https_proxy` based on `proxy`.
+/// Set value of `client.http_proxy` and `client.https_proxy` based on value of `proxy`.
 ///
 /// Refer to code for `std.http.Client.initDefaultProxies` for example.
 ///
@@ -313,7 +338,7 @@ pub fn main() !void {
 fn setClientProxy(arena: std.mem.Allocator, client: *std.http.Client, proxy: []const u8) !void {
     client.connection_pool.mutex.lock();
     defer client.connection_pool.mutex.unlock();
-    std.debug.assert(client.connection_pool.used.first == null);
+    funcs.assert(client.connection_pool.used.first == null);
 
     const a = try std.Uri.parse(proxy);
 
@@ -353,23 +378,25 @@ const DryRunOutput = struct {
     const Self = @This();
 
     /// Caller owns returned slice.
-    fn asJson(self: Self, alloc: std.mem.Allocator) []u8 {
-        var out_str = std.ArrayListUnmanaged(u8).initCapacity(alloc, 4096) catch @panic("Out of memory!");
+    fn asJson(self: Self, alloc: std.mem.Allocator) []const u8 {
+        var out_str = std.ArrayListUnmanaged(u8).initCapacity(alloc, 1024) catch @panic("Out of memory!");
         errdefer alloc.free(out_str);
 
-        std.json.stringify(self, .{ .whitespace = .indent_4, .emit_nonportable_numbers_as_strings = true }, out_str.writer(alloc)) catch @panic("Writer Error");
+        std.json.stringify(self, .{ .whitespace = .indent_4, .emit_nonportable_numbers_as_strings = true }, out_str.writer(alloc)) catch @panic("Stream writer error");
         return out_str.toOwnedSlice(alloc) catch @panic("Out of memory!");
     }
 };
 
 /// Parse API response, and return entry ID. In case of status other than 201, print some info to stderr.
+///
+/// `alloc` should be an arena allocator or similar.
 fn parseApiResponse(alloc: std.mem.Allocator, req: *std.http.Client.Request) !?[]const u8 {
     var rdr = req.reader();
 
-    const body = try rdr.readAllAlloc(alloc, 4096);
+    const body = try rdr.readAllAlloc(alloc, 1024);
     defer alloc.free(body);
 
-    const parsed = std.json.parseFromSliceLeaky(ApiResponse, alloc, body, .{ .ignore_unknown_fields = true }) catch unreachable;
+    const parsed = std.json.parseFromSliceLeaky(ApiResponse, alloc, body, .{ .ignore_unknown_fields = true }) catch return error.JsonParseError;
 
     switch (req.response.status) {
         .created => {
@@ -378,7 +405,7 @@ fn parseApiResponse(alloc: std.mem.Allocator, req: *std.http.Client.Request) !?[
         },
         .bad_request => |st| { // 400
             @branchHint(.unlikely);
-            std.log.err("FAILURE: {d} | response detail: {?s}", .{ st, parsed.detail });
+            std.log.err("FAILURE: {d} | Response detail: {?s}", .{ st, parsed.detail });
             if (parsed.detail == null) {
                 std.log.err("Response body: {s}", .{body});
             }
@@ -456,17 +483,17 @@ const ConfigData = struct {
     fn readFile(self: *Self, alloc: std.mem.Allocator) !void {
         if (IS_DEBUG) std.log.debug("Loading config from file ...", .{});
 
-        const CONF_FILE_PATH: []const u8 = try funcs.getConfigPath(alloc);
-        defer alloc.free(CONF_FILE_PATH);
+        const conf_file_abs: []const u8 = try funcs.getConfigPath(alloc);
+        defer alloc.free(conf_file_abs);
 
-        if (IS_DEBUG) std.log.debug("CONF_FILE_PATH: {s}", .{CONF_FILE_PATH});
+        if (IS_DEBUG) std.log.debug("Absolute path to config file: {s}", .{conf_file_abs});
 
-        const handle = std.fs.openFileAbsolute(CONF_FILE_PATH, .{
+        const handle = std.fs.openFileAbsolute(conf_file_abs, .{
             .mode = .read_only,
         }) catch |err| {
             switch (err) {
                 error.FileNotFound => {
-                    std.log.debug("Config file not found.", .{});
+                    std.log.debug("Config file not found.", .{}); // Not an error per se.
                     return;
                 },
                 else => {
@@ -520,6 +547,22 @@ const Options = struct {
 /// Testing / unused right now.
 const InvalidIpAddr = error{ InvalidIpAddrV4, InvalidIpAddrV6 };
 
+/// Verify all required args were given; if any one missing, return `false`.
+fn check_reqd_args(params: anytype, configs: *ConfigData) !bool {
+    const x_addr = params.options.address != null;
+    const x_router = params.options.router != null or configs.*.routeros_host != null;
+    const x_auth = params.options.auth != null or configs.*.auth != null;
+
+    const reqd_args_status = [_]bool{ x_addr, x_router, x_auth };
+
+    for (reqd_args_status) |exists| {
+        if (!exists) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// Validate and consolidate param values that will become parts of the http request.
 /// Any possible bad values should be caught before being forwarded to api, to minimize wasted resources.
 ///
@@ -536,7 +579,6 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
                 if (!(validation.validateIpAddrV4(v) or validation.validateDnsName(v))) {
                     @branchHint(.unlikely);
                     std.log.err("Invalid IPv4 address/fqdn (-a/--address) for /ip/ (IPv4) endpoint: {s}", .{v});
-
                     return error.InvalidIpAddrV4;
                 }
             },
@@ -545,7 +587,6 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
                 if (!(validation.validateIpAddr(v) or validation.validateDnsName(v))) {
                     @branchHint(.unlikely);
                     std.log.err("Invalid IP address/fqdn (-a/--address) for /ipv6/ endpoint: {s}", .{v});
-
                     return error.InvalidIpAddrV6;
                 }
             },
@@ -553,7 +594,6 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
         bad_ip = v;
     } else {
         @branchHint(.unlikely);
-
         return error.MissingRequiredParam;
     }
 
