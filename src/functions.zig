@@ -21,7 +21,7 @@ const pass_prompt: []const u8 = "Enter RouterOS password: ";
 pub fn getPassDispatch(alloc: std.mem.Allocator) ![]const u8 {
     switch (checkForKdialog(alloc)) {
         true => return try getPassGraphical(alloc),
-        false => return getPassCli(alloc),
+        false => return try getPassCli(alloc),
     }
 }
 
@@ -66,16 +66,24 @@ fn getPassGraphical(alloc: std.mem.Allocator) ![]const u8 {
     }
 }
 
-/// Get password via stdin. Not called directly; Called by `getPassDispatch()`
+/// Get password via stdin. Caller must free returned slice.
+/// Not called directly; Called by `getPassDispatch()`
 ///
 /// TODO: Hide input via control codes while typing.
-fn getPassCli(alloc: std.mem.Allocator) []const u8 {
+fn getPassCli(alloc: std.mem.Allocator) (std.mem.Allocator.Error || error{ StreamTooLong, ReadError, WriteError })![]const u8 {
     const stdin = std.io.getStdIn().reader();
     const stderr = std.io.getStdErr().writer();
 
-    stderr.print(pass_prompt, .{}) catch unreachable;
-    const p = stdin.readUntilDelimiterAlloc(alloc, '\n', 512) catch unreachable;
-    return p;
+    stderr.print(pass_prompt, .{}) catch return error.WriteError;
+    const pw = stdin.readUntilDelimiterOrEofAlloc(alloc, '\n', 512) catch |err| {
+        std.log.err("Failure reading stdin: {s}", .{@errorName(err)});
+        return error.ReadError;
+    };
+
+    if (pw) |val| return val else {
+        std.log.warn("Value null!", .{});
+        return "";
+    }
 }
 
 /// Return full absolute path to config file.
