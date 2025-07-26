@@ -14,17 +14,11 @@ micro-mikro-client 0.0.0
 Options:
 
   -a, --address                    (REQUIRED) IP address to append to address-list.
-  -r, --router                     (REQUIRED) Firewall/router hostname or IP. May also be set
+  -r, --router                     (REQUIRED*) Firewall/router hostname or IP. May also be set
                                      via environment variable $MICROMIKRO_FIREWALL
   -l, --address-list               Name of address-list (default: 'zigwang')
   -c, --comment                    Comment (printable ascii <= 127). (default: "")
   -t, --timeout                    Timeout - i.e. 4h or 00:04:00 (default: 4h)
-  -p, --port                       Port, in case of REST API on non-standard port. Optional.
-  -x, --proxy                      HTTP(S) proxy. This option takes precedence over any proxies
-                                     found in $HTTP_PROXY/$HTTPS_PROXY env vars (i.e. --proxy ->
-                                     environment -> none). Optional.
-  -P, --ignore-system-proxy        Ignore $HTTP_PROXY/$HTTPS_PROXY environment variables. Might
-                                     be useful for testing or odd networks.
   -e, --auth                       (REQUIRED*) Base64-encoded http basic auth string (i.e.
                                      result of `echo -n "user:pass" | base64`). May also be set
                                      via environment variable $MICROMIKRO_AUTH
@@ -32,6 +26,12 @@ Options:
                                      specified, a dialog (kdialog or stdin) will be spawned to
                                      prompt for password. Can only be used in an interactive
                                      shell - not scriptable. Recommended to pass `--auth` instead.
+  -p, --port                       Port, in case of REST API on non-standard port. Optional.
+  -x, --proxy                      HTTP(S) proxy. This option takes precedence over any proxies
+                                     found in $HTTP_PROXY/$HTTPS_PROXY env vars (i.e. --proxy ->
+                                     environment -> none). Optional.
+  -P, --ignore-system-proxy        Ignore $HTTP_PROXY/$HTTPS_PROXY environment variables. Might
+                                     be useful for testing or odd networks.
   -I, --insecure                   Use plaintext http (no tls) (not recommended). Only for
                                      testing; be mindful that without TLS, you'll be sending
                                      RouterOS credentials, with write access to your firewall, in
@@ -49,6 +49,7 @@ Options:
       --ignore-config              Ignore config - don't read options from config file OR
                                      environment vars. Mostly for development; CLI args will
                                      always override config anyways.
+      --no-newline                 Don't append trailing newline to output. May be useful in scripts.
       --help                       print help information
       --version                    print version information
 ```
