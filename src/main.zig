@@ -29,7 +29,7 @@ pub const arg_spec = [_]zli.Arg{
     },
     .{
         .name = .{ .long = .{ .full = "router", .short = 'r' } },
-        .short_help = "(REQUIRED*) Firewall/router hostname or IP. May also be set via environment variable $MICROMIKRO_FIREWALL",
+        .short_help = "(REQUIRED*) Firewall/router hostname or IP. May also be set via environment variable $MICROMIKRO_ROUTER",
         .type = []const u8,
     },
     .{
@@ -185,7 +185,7 @@ pub fn main() !void {
     const validated_params = try validateParams(alloc, params);
 
     // Construct endpoint URI
-    const router_addr: []const u8 = validated_params.router orelse configs.*.routeros_host orelse {
+    const router_addr: []const u8 = validated_params.router orelse configs.*.router orelse {
         @branchHint(.unlikely);
         std.log.err("Missing value for parameter -r/--router", .{});
         return error.MissingRouterAddr;
@@ -201,7 +201,7 @@ pub fn main() !void {
     };
 
     // Set auth to passed value first, if null then fall back to config. (--user -> --auth -> config)
-    var auth_raw: ?[]const u8 = validated_params.ubuf orelse params.options.auth orelse configs.*.auth orelse null;
+    var auth_raw: ?[]const u8 = validated_params.user orelse params.options.auth orelse configs.*.auth orelse null;
     var auth_raw_needs_freed: bool = false;
     if (auth_raw) |val| {
         if (val.len > 4096) {
@@ -232,7 +232,7 @@ pub fn main() !void {
 
     // Set any additional PAYLOAD params here - all except .address have defaults
     var payload_items = Payload{
-        .address = validated_params.bad_ip,
+        .address = validated_params.address,
     };
     if (validated_params.comment) |v| payload_items.comment = v;
     if (validated_params.timeout) |v| payload_items.timeout = v;
@@ -446,7 +446,7 @@ const ApiResponse = struct {
 /// Contains program config values, as read from conf file/environment
 const ConfigData = struct {
     auth: ?[]const u8 = null,
-    routeros_host: ?[]const u8 = null,
+    router: ?[]const u8 = null,
 
     const Self = @This();
 
@@ -456,8 +456,8 @@ const ConfigData = struct {
         if (self.auth != null) {
             alloc.free(self.auth.?);
         }
-        if (self.routeros_host != null) {
-            alloc.free(self.routeros_host.?);
+        if (self.router != null) {
+            alloc.free(self.router.?);
         }
     }
 
@@ -467,13 +467,13 @@ const ConfigData = struct {
 
         // Names of envvars
         const envvar_auth: []const u8 = "MICROMIKRO_AUTH";
-        const envvar_router: []const u8 = "MICROMIKRO_FIREWALL";
+        const envvar_router: []const u8 = "MICROMIKRO_ROUTER";
 
         if (std.process.hasNonEmptyEnvVarConstant(envvar_auth)) {
             self.*.auth = try std.process.getEnvVarOwned(alloc, envvar_auth);
         }
         if (std.process.hasNonEmptyEnvVarConstant(envvar_router)) {
-            self.routeros_host = try std.process.getEnvVarOwned(alloc, envvar_router);
+            self.router = try std.process.getEnvVarOwned(alloc, envvar_router);
         }
 
         return;
@@ -527,20 +527,20 @@ const ConfigData = struct {
         }
 
         if (parsed.auth) |val| self.auth = try alloc.dupe(u8, val);
-        if (parsed.routeros_host) |val| self.routeros_host = try alloc.dupe(u8, val);
+        if (parsed.router) |val| self.router = try alloc.dupe(u8, val);
 
         return;
     }
 };
 
-/// All fields are optionals, EXCEPT `.bad_ip`
+/// All fields are optionals, EXCEPT `.address`
 const Options = struct {
-    bad_ip: []const u8,
+    address: []const u8,
     timeout: ?[]const u8,
     comment: ?[]const u8,
     router: ?[]const u8,
     addr_list: ?[]const u8,
-    ubuf: ?[]const u8,
+    user: ?[]const u8,
     port: ?u16,
 };
 
@@ -550,12 +550,12 @@ const InvalidIpAddr = error{ InvalidIpAddrV4, InvalidIpAddrV6 };
 /// Verify all required args were given; if any one missing, return `false`.
 fn checkReqdArgs(params: anytype, configs: *ConfigData) !bool {
     const x_addr = params.options.address != null;
-    const x_router = params.options.router != null or configs.*.routeros_host != null;
+    const x_router = params.options.router != null or configs.*.router != null;
     const x_auth = params.options.auth != null or configs.*.auth != null;
 
-    const reqd_args_status = [_]bool{ x_addr, x_router, x_auth };
+    const statii = [_]bool{ x_addr, x_router, x_auth };
 
-    for (reqd_args_status) |exists| {
+    for (statii) |exists| {
         if (!exists) {
             return false;
         }
@@ -570,7 +570,7 @@ fn checkReqdArgs(params: anytype, configs: *ConfigData) !bool {
 fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
     // IP addr - required
     // IPv4 endpoint accepts v4 addr; v6 endpoint accepts BOTH v4/v6 addr. Both endpoints accept a dns name. Validate accordingly.
-    var bad_ip: []const u8 = undefined;
+    var address: []const u8 = undefined;
     if (params.options.address) |v| {
         @branchHint(.likely);
         switch (params.options.ipv6) {
@@ -591,7 +591,7 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
                 }
             },
         }
-        bad_ip = v;
+        address = v;
     } else {
         @branchHint(.unlikely);
         return error.MissingRequiredParam;
@@ -602,7 +602,6 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
     if (timeout) |v| {
         if (!validation.validateTimeout(v)) {
             std.log.err("Invalid value for parameter -t/--timeout.", .{});
-
             return error.InvalidTimeout;
         }
     }
@@ -613,13 +612,11 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
         if (!validation.isAsciiPrintable(v)) {
             @branchHint(.cold);
             std.log.err("Invalid value (of length {d}) for parameter -c/--comment.", .{v.len});
-
             return error.InvalidComment;
         }
         if (v.len > 128) {
             @branchHint(.cold);
             std.log.err("Comment too long (length {d})", .{v.len});
-
             return error.InvalidComment;
         }
         comment = v;
@@ -632,7 +629,6 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
         if (!validation.validateDnsName(v) and !validation.validateIpAddr(v)) {
             @branchHint(.cold);
             std.log.err("Invalid host for parameter -r/--router.", .{});
-
             return error.InvalidRouterHost;
         }
         router = v;
@@ -644,13 +640,11 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
         if (!validation.isAsciiPrintable(v)) {
             @branchHint(.cold);
             std.log.err("Invalid value for parameter -l/--address-list.", .{});
-
             return error.InvalidAddrList;
         }
         if (v.len > 128) {
             @branchHint(.cold);
             std.log.err("Value too long for parameter -l/--address-list. (length {d}) ", .{v.len});
-
             return error.InvalidAddrList;
         }
         addr_list = v;
@@ -658,17 +652,16 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
 
     // Username, for interactive auth
     // TODO: Check RouterOS wiki for max user length
-    var ubuf: ?[]const u8 = null;
+    var user: ?[]const u8 = null;
     if (params.options.user) |v| {
         if ((!validation.isAsciiPrintable(v)) or v.len > 512) {
             @branchHint(.cold);
-
             return error.InvalidUserName;
         }
 
         const _pw: []const u8 = try funcs.getPassDispatch(alloc); // Prompt for pw
 
-        ubuf = std.fmt.allocPrint(alloc, "{s}:{s}", .{ v, _pw[0.._pw.len] }) catch @panic("Out of memory!");
+        user = std.fmt.allocPrint(alloc, "{s}:{s}", .{ v, _pw[0.._pw.len] }) catch @panic("Out of memory!");
     }
 
     // Port
@@ -691,12 +684,12 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
     }
 
     return Options{
-        .bad_ip = bad_ip,
+        .address = address,
         .timeout = timeout,
         .comment = comment,
         .router = router,
         .addr_list = addr_list,
-        .ubuf = ubuf,
+        .user = user,
         .port = port,
     };
 }
@@ -705,14 +698,14 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
 
 test "ConfigData optionals" {
     const x = ConfigData{};
-    try std.testing.expect(x.auth == null and x.routeros_host == null);
+    try std.testing.expect(x.auth == null and x.router == null);
 }
 
 test "ConfigData allocated" {
     const x: *ConfigData = try std.testing.allocator.create(ConfigData);
     defer std.testing.allocator.destroy(x);
     x.* = ConfigData{};
-    try std.testing.expect(x.auth == null and x.routeros_host == null);
+    try std.testing.expect(x.auth == null and x.router == null);
 }
 
 test "ConfigData.readFile + .readEnv" {
@@ -731,22 +724,22 @@ test "ConfigData.readFile + .readEnv" {
 
     // These 3 will pass with any valid configs.
     try std.testing.expect(configs.auth != null);
-    try std.testing.expect(configs.routeros_host != null);
-    try std.testing.expect(std.mem.containsAtLeastScalar(u8, configs.routeros_host.?, 1, '.'));
+    try std.testing.expect(configs.router != null);
+    try std.testing.expect(std.mem.containsAtLeastScalar(u8, configs.router.?, 1, '.'));
     // These depend on default configs.
     try std.testing.expectEqualSlices(u8, "dXNlcjpwdw==", configs.auth.?);
-    try std.testing.expectEqualStrings("router.lan", configs.routeros_host.?);
+    try std.testing.expectEqualStrings("router.lan", configs.router.?);
 
     // Now test .readEnv()
     try configs.readEnv(alloc);
 
     // These 3 should pass with *any* valid configs.
     try std.testing.expect(configs.auth != null);
-    try std.testing.expect(configs.routeros_host != null);
-    try std.testing.expect(std.mem.containsAtLeastScalar(u8, configs.routeros_host.?, 1, '.'));
+    try std.testing.expect(configs.router != null);
+    try std.testing.expect(std.mem.containsAtLeastScalar(u8, configs.router.?, 1, '.'));
     // These depend on default config. (.env.json.default)
     try std.testing.expectEqualStrings("dXNlcjpwdw==", configs.auth.?);
-    try std.testing.expectEqualSlices(u8, "router.lan", configs.routeros_host.?);
+    try std.testing.expectEqualSlices(u8, "router.lan", configs.router.?);
 }
 
 test "Payload" {
