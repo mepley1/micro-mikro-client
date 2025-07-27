@@ -7,10 +7,7 @@
 ## Add switch to choose FixedBufferAllocator if building in ReleaseSmall mode
 - embedded usually won't be able to use an OS allocator
 
-## Rename config file from `.env.json` to something more standard
-
-## Rename options in config file, as well as environment vars, to match command line options.
-- all three should be consistent. Env vars should continue to be prepended with `MICROMIKRO_` or similar to distinguish from others.
+## Rename config file from `.env.json` to something more standard?
 
 ## Fetch ZLS in build.zig, rather than including copy?
 - I prefer to include any code used for stability/security, but it's more convenient to fetch it.
