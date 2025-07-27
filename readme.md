@@ -9,13 +9,11 @@ Uses around 2KB memory depending on how you build it, (~2K in `ReleaseFast`, sli
 # Usage
 
 ```
-micro-mikro-client 0.0.0
-
 Options:
 
   -a, --address                    (REQUIRED) IP address to append to address-list.
   -r, --router                     (REQUIRED*) Firewall/router hostname or IP. May also be set
-                                     via environment variable $MICROMIKRO_FIREWALL
+                                     via environment variable $MICROMIKRO_ROUTER
   -l, --address-list               Name of address-list (default: 'zigwang')
   -c, --comment                    Comment (printable ascii <= 127). (default: "")
   -t, --timeout                    Timeout - i.e. 4h or 00:04:00 (default: 4h)
@@ -59,9 +57,9 @@ Options:
 - `-a, --address` | The IP you want to add to the address-list. RouterOS will also accept a DNS name, which it will resolve on its own using whatever DNS is configured for its own queries.
 - `-r, --router` | DNS name or IP addr of RouterOS host. (Can also set in static config)
 - `--auth` or `--user` | Either of these two auth options may be used, OR auth can be set in config (see below). `--auth` expects the base64-encoded (or not) `user:pass` substring of a http basic auth header ([rfc7617](https://datatracker.ietf.org/doc/html/rfc7617)). Easy way to get this value: `echo -n "username:password" | base64`. If `--user` is passed instead, you'll be prompted interactively for a password via either kdialog (if available and in a graphical environment) or a stdin reader. (thus `--user` shouldn't be used in scripts).
-- Recommended to also include `-l`/`--address-list`, `-t`/`--timeout`, and `-c, --comment`. If not included, some defaults will be used, which may or may not suit your preferences. (TODO: Allow these to be configured in conf file)
+- Recommended to also include `-l, --address-list`, `-t, --timeout`, and `-c, --comment`. If not included, some defaults will be used, which may or may not suit your preferences. (TODO: Allow these to be configured in conf file)
 
-The RouterOS host address (`-r`/`--router`) and auth creds (`--auth`) can also be configured in `~/.config/micro-mikro-client/.env.json`, or via environment variables (`MICROMIKRO_AUTH` and `MICROMIKRO_FIREWALL`). (TODO: Rename these to be consistent with conf file)
+The RouterOS host address (`-r`/`--router`) and auth creds (`--auth`) can also be configured in `$XDG_CONFIG_HOME/micro-mikro-client/.env.json`, or via environment variables (`MICROMIKRO_AUTH` and `MICROMIKRO_ROUTER`).
 
 Program also respects `$HTTP_PROXY` + `$HTTPS_PROXY` variables and will use them if found.
 
@@ -127,7 +125,7 @@ Or, for specific target triples:
 
 ## Dependencies
 
-[zli](https://github.com/dweiller/zli) (note: there are currently several different libs named ZLI to be found, that do the same thing).
+[zli](https://github.com/dweiller/zli) (note: there are currently several different libs named ZLI to be found, for similar purposes).
 
 # Notes
 

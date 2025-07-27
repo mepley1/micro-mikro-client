@@ -10,7 +10,7 @@ mv "/home/$(whoami)/.config/micro-mikro-client/.env.json" "/home/$(whoami)/.conf
 cp "./.env.json.default" "/home/$(whoami)/.config/micro-mikro-client/.env.json"
 
 # Set up environment vars
-MICROMIKRO_FIREWALL=router.lan
+MICROMIKRO_ROUTER=router.lan
 MICROMIKRO_AUTH="dXNlcjpwdw=="
 
 zig test src/main.zig
