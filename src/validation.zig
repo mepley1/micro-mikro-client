@@ -4,15 +4,16 @@ const std = @import("std");
 
 const base64_table: []const u8 = &std.base64.standard_alphabet_chars;
 
-/// Check if input slice is "probably" b64-encoded data (or rather, it's not an un-encoded HTTP basic auth str). For the use case, it's not worth running through a whole decode algo to validate, this is more than enough.
+/// Check if input slice is "probably" b64-encoded data (or at least, it's not an un-encoded HTTP basic auth str).
+/// This won't catch everything, for example "1234" or "abcd" will pass. For the use case, it's plenty - this is just for convenience, to allow passing an un-encoded auth str and encode it automatically.
 pub fn validateB64(s: []const u8) bool {
     const valid_chars: []const u8 = base64_table ++ "=";
     if (s.len % 4 != 0) {
         return false;
     }
-    for (s) |c| {
-        // Could also use `std.ascii.isHex()` plus '+', '/', and '='
-        if (!std.mem.containsAtLeastScalar(u8, valid_chars, 1, c)) {
+    for (s) |*c| {
+        // Could also use `std.ascii.isHex()` plus a check for '+', '/', and '='
+        if (!std.mem.containsAtLeastScalar(u8, valid_chars, 1, c.*)) {
             return false;
         }
     }
@@ -53,17 +54,28 @@ pub fn validateDnsName(addr: []const u8) bool {
 
 /// Validate given slice contains only Ascii printable chars (no control codes)
 ///
-/// Similar to std.ascii.isPrint(), but flattened.
+/// Similar to running `std.ascii.isPrint()` and `std.ascii.isControl()`, but flattened.
 ///
-/// For each char: 0x1f (31) <= `char` <= 0x7f (127)
+/// For each char: 0x1f (UNIT SEPARATOR) < `char` < 0x7f (DEL)
 pub fn isAsciiPrintable(buf: []const u8) bool {
-    for (buf) |char| {
-        if (char < 0x1f or char > 0x7f) {
+    for (buf) |*c| {
+        if (c.* <= 0x1f or c.* >= 0x7f) {
             @branchHint(.unlikely);
             return false;
         }
     }
     return true;
+}
+
+test "isAsciiPrintable" {
+    std.testing.log_level = .debug;
+    try std.testing.expect(isAsciiPrintable(" "));
+    try std.testing.expect(isAsciiPrintable("$%=Zig(k:v);"));
+    try std.testing.expect(isAsciiPrintable(&[_]u8{ 0x20, 0x7e }));
+
+    const bad = [_]u8{ 0x1f, 0x7f };
+    try std.testing.expect(!isAsciiPrintable(&bad));
+    try std.testing.expect(!isAsciiPrintable("🚫"));
 }
 
 /// unused right now. Similar to `isAsciiPrintable` above, but allows value up to max 0xff (no control codes <0x1f).
