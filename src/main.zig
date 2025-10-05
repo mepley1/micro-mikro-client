@@ -245,7 +245,7 @@ pub fn main() !void {
     // defer alloc.free(payload);
 
     // JSONify (method 2 - stack buffer)
-    var payload_buf: [512]u8 = undefined;
+    var payload_buf: [1024]u8 = undefined;
     var payload_stream = std.io.fixedBufferStream(&payload_buf);
     try std.json.stringify(payload_items, json_options, payload_stream.writer());
     const payload: []const u8 = payload_stream.getWritten();
