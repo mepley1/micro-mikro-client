@@ -297,6 +297,9 @@ pub fn main() !void {
             try req.send();
             try wtr.writeAll(payload);
             try req.finish();
+            if (IS_DEBUG == true) {
+                std.log.debug("Awaiting RouterOS response...", .{});
+            }
             try req.wait();
 
             // Read the response and print ID to stdout.
