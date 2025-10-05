@@ -4,8 +4,6 @@ A tiny scriptable CLI client for MikroTik RouterOS REST API, for manipulating IP
 
 Appends an IP address to a RouterOS `/ip` or `/ipv6` `/firewall/address-list` for use in firewall filters or etc.
 
-Uses around 2KB memory depending on how you build it, (~2K in `ReleaseFast`, slightly less in Small - plus some extra in case of errors), so can be used on smaller devices/systems.
-
 # Usage
 
 ```
@@ -61,10 +59,10 @@ Options:
 
 The RouterOS host address (`-r`/`--router`) and auth creds (`--auth`) can also be configured in `$XDG_CONFIG_HOME/micro-mikro-client/.env.json`, or via environment variables (`MICROMIKRO_AUTH` and `MICROMIKRO_ROUTER`).
 
-Program also respects `$HTTP_PROXY` + `$HTTPS_PROXY` variables and will use them if found.
+Program also respects existing `$HTTP_PROXY` + `$HTTPS_PROXY` environment variables and will use them if found.
 
 The RouterOS host's TLS cert must be trusted by the host running the program, otherwise you will need to use `-I/--insecure` (no TLS). Supports TLS v1.2 via stdlib's `std.http.Client`.
-`mkcert` is useful for testing certs. If for some reason you haven't configured TLS on your RouterOS host, then you *really* need to do so anyways if you're enabling the APIs and/or web interface.
+- `mkcert` is useful for testing certs. If for some reason you haven't configured TLS on your RouterOS host, then you *really* need to do so anyways if you're enabling the APIs and/or web interface.
 
 ## Examples
 
@@ -73,11 +71,11 @@ If you have configured your auth string and RouterOS hostname in static config, 
 micro-mikro-client -a 10.20.30.40
 ```
 
-Append an address to an __IPv4__ `address-list` named `badips`, timeout 4 hours, RouterOS host at `192.168.88.1`:
+Append an address `10.0.10.1` to an __IPv4__ `address-list` named `badips`, timeout 4 hours, RouterOS host at `192.168.88.1`:
 
 ```sh
 micro-mikro-client \
-    -a 10.20.30.40 \
+    -a 10.0.10.1 \
     -r 192.168.88.1 \
     -t 4h \
     --address-list "badips" \
@@ -85,12 +83,12 @@ micro-mikro-client \
     --auth "dXNlcjpwd2Q="
 ```
 
-Similar to above, but append to an __IPv6__ `address-list`:
+Same as above, but append an __IPv6__ addr to an __IPv6__ `address-list`:
 
 ```sh
 micro-mikro-client \
     -6 \
-    -a 2001:db8::abcd:1234 \
+    -a 2001:db8::bad:add \
     -r 192.168.88.1 \
     -t 4h \
     --address-list "badips" \
@@ -103,10 +101,13 @@ Add own public IP addr to an address list:
 micro-mikro-client -a $(curl https://ip.mepley.net) --address-list "self-public" -t 4h --comment "Automated" 
 ```
 
-Pass auth str, encoded via bash expansion:
+Encode a raw auth str via `base64`:
+
 ```sh
 micro-mikro-client -6 -a 2001:db8::bad:add:2 -r 2001:db8::1 -l "example-list" --auth $(echo -n "user:pass" | base64)
 ```
+
+In many cases the program will catch and encode an un-encoded auth str, but it performs a naive check that won't catch everything. Therefore I recommend encoding it.
 
 ## Config
 
@@ -125,14 +126,18 @@ Or, for specific target triples:
 
 ## Dependencies
 
-[zli](https://github.com/dweiller/zli) (note: there are currently several different libs named ZLI to be found, for similar purposes).
+- [zli](https://github.com/dweiller/zli) (note: there are currently several different libs named ZLI to be found, for similar purposes).
+
+Optional:
+
+- `kdialog` - If doing interactive auth, and `kdialog` is available, it will be used to prompt user for pw.
 
 # Notes
 
 - RouterOS will accept an IPv4 address to add to an IPv6 address-list, but not vice versa. If the API responds with "xxx is not a valid DNS name", check your `--address` value.
 - To b64-encode your creds, you can use `echo -n "user:pass" | base64` in a bash shell.
 - Lots of `@branchHint(.likely)`/`@branchHint(.unlikely)` are used throughout the code, particularly around validation flows- because you're passing valid parameter values, *right?* ;)
-- http.client works fine with RouterOS's TLS v1.2, but seemingly only by domain name and not IP. Not sure whether issue is with RouterOS or http.Client, or on my part.
+- http client works fine with RouterOS's TLS v1.2, but seemingly only by domain name and not IP. Not sure whether issue is with RouterOS or http.Client, or on my part.
 
 # To do
 
@@ -142,4 +147,4 @@ TODO: this
 
 Any pull requests are welcome, but maybe open an issue before putting your time into it. Expect spontaneous breaking changes.
 
-Search the code for comments beginning with `TODO` or see `TODO.md` to find some low-hanging fruit.
+For some low-hanging fruit, search the code for comments beginning with `TODO` or see `TODO.md`.
