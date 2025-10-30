@@ -1,8 +1,8 @@
 # micro-mikro-client
 
-A tiny scriptable CLI client for MikroTik RouterOS REST API, for manipulating IPv4/IPv6 firewall address lists. Can be used standalone or as an automated action for your IDS/firewall/honeypot. Written in Zig.
+A tiny scriptable CLI client/wrapper for MikroTik RouterOS REST API, for manipulating IPv4/IPv6 firewall address lists. Can be used standalone or as an automated action for your IDS/firewall/honeypot. Written in Zig.
 
-Appends an IP address to a RouterOS `/ip` or `/ipv6` `/firewall/address-list` for use in firewall filters or etc.
+Appends an IP address to a RouterOS `/ip` or `/ipv6` `/firewall/address-list` for use in firewall filters/dns or etc.
 
 # Usage
 
