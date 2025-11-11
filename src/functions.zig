@@ -70,25 +70,36 @@ fn getPassGraphical(alloc: std.mem.Allocator) (std.process.Child.SpawnError || s
     }
 }
 
-/// Get password via stdin. Caller must free returned slice.
-/// Not called directly; Called by `getPassDispatch()`
+/// Prompt for pw + read from stdin. Caller must free returned slice.
 ///
-/// TODO: Hide input via control codes while typing.
-/// TODO: Call systemd-ask-password if available i.e. `systemd-ask-password -n  --user --timeout=60 --echo=no --emoji=no --no-output`
-fn getPassCli(alloc: std.mem.Allocator) (std.mem.Allocator.Error || error{ StreamTooLong, ReadError, WriteError })![]const u8 {
-    const stdin = std.io.getStdIn().reader();
-    const stderr = std.io.getStdErr().writer();
+/// Private; called by `getPassDispatch()`
+fn getPassCli(alloc: std.mem.Allocator) ![]const u8 {
+    const stdin = std.io.getStdIn();
 
-    stderr.print(pass_prompt, .{}) catch return error.WriteError;
-    const pw = stdin.readUntilDelimiterOrEofAlloc(alloc, '\n', 512) catch |err| {
-        std.log.err("Failure reading stdin: {s}", .{@errorName(err)});
-        return error.ReadError;
-    };
+    std.debug.print(pass_prompt, .{});
 
-    if (pw) |*val| return val.* else {
-        std.log.warn("Value null!", .{});
-        return "";
+    try disableEcho(stdin.handle);
+    defer enableEcho(stdin.handle) catch @panic("Couldn't re-enable ");
+    var stdin_reader = stdin.reader();
+    const password = try stdin_reader.readUntilDelimiterAlloc(alloc, '\n', 1024);
+
+    if (password.len == 0) {
+        return error.EmptyPassword;
     }
+    return password;
+}
+
+/// Disable echo, to hide input. Don't forget to reset.
+fn disableEcho(fd: std.posix.fd_t) !void {
+    var termios: std.posix.termios = try std.posix.tcgetattr(fd);
+    termios.lflag.ECHO = false;
+    try std.posix.tcsetattr(fd, .NOW, termios);
+}
+
+fn enableEcho(fd: std.posix.fd_t) !void {
+    var termios: std.posix.termios = try std.posix.tcgetattr(fd);
+    termios.lflag.ECHO = true;
+    try std.posix.tcsetattr(fd, .NOW, termios);
 }
 
 test "getPassCli" {
