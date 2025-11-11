@@ -74,6 +74,7 @@ fn getPassGraphical(alloc: std.mem.Allocator) (std.process.Child.SpawnError || s
 /// Not called directly; Called by `getPassDispatch()`
 ///
 /// TODO: Hide input via control codes while typing.
+/// TODO: Call systemd-ask-password if available i.e. `systemd-ask-password -n  --user --timeout=60 --echo=no --emoji=no --no-output`
 fn getPassCli(alloc: std.mem.Allocator) (std.mem.Allocator.Error || error{ StreamTooLong, ReadError, WriteError })![]const u8 {
     const stdin = std.io.getStdIn().reader();
     const stderr = std.io.getStdErr().writer();
@@ -84,10 +85,14 @@ fn getPassCli(alloc: std.mem.Allocator) (std.mem.Allocator.Error || error{ Strea
         return error.ReadError;
     };
 
-    if (pw) |val| return val else {
+    if (pw) |*val| return val.* else {
         std.log.warn("Value null!", .{});
         return "";
     }
+}
+
+test "getPassCli" {
+    // const input = try getPassCli(std.testing.allocator_instance);
 }
 
 /// Return full absolute path to config file.
