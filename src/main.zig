@@ -9,8 +9,8 @@ const b64 = @import("b64.zig");
 const validation = @import("validation.zig");
 
 pub const IS_DEBUG = switch (builtin.mode) {
-    .Debug, .ReleaseSafe => true,
-    .ReleaseFast, .ReleaseSmall => false,
+    .Debug => true,
+    .ReleaseFast, .ReleaseSmall, .ReleaseSafe => false,
 };
 
 /// Body of the http request.
@@ -141,7 +141,7 @@ pub fn main() !void {
     const alloc = arena.allocator();
 
     // If called with no args, print help + return
-    const num_args = try getNumArgs(alloc);
+    const num_args: usize = try getNumArgs(alloc);
     if (num_args <= 1) {
         try Cli.printHelp();
         return;
@@ -557,16 +557,13 @@ const Options = struct {
     port: ?u16,
 };
 
-/// Testing / unused right now.
-const InvalidIpAddr = error{ InvalidIpAddrV4, InvalidIpAddrV6 };
-
 /// Verify all required args were given; if any one missing, return `false`.
 fn ensureReqdArgs(params: anytype, configs: *ConfigData) !bool {
-    const x_addr = params.options.address != null;
-    const x_router = params.options.router != null or configs.*.router != null;
-    const x_auth = params.options.auth != null or configs.*.auth != null;
+    const x_addr: bool = params.options.address != null;
+    const x_router: bool = params.options.router != null or configs.*.router != null;
+    const x_auth: bool = params.options.auth != null or configs.*.auth != null;
 
-    const statii = [_]bool{ x_addr, x_router, x_auth };
+    const statii: [3]bool = [_]bool{ x_addr, x_router, x_auth };
 
     for (statii) |exists| {
         if (!exists) {
@@ -577,23 +574,20 @@ fn ensureReqdArgs(params: anytype, configs: *ConfigData) !bool {
 }
 
 /// Args that are *required* for program to function.
-const num_reqd_args = 3;
+/// Real world: (n * 2) + 1
+// const num_reqd_args = 3;
 
-/// If program was called with no arguments, print help.
+/// Return num of args passed to program.
 fn getNumArgs(alloc: std.mem.Allocator) (error{ OutOfMemory, Overflow } || std.fs.File.Writer.Error)!usize {
     const kwargs = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, kwargs);
     const n = kwargs.len;
 
-    // switch (n) {
-    //     0...1 => {
-    //         try Cli.printHelp();
-    //     },
-    //     else => {},
-    // }
-
     return n;
 }
+
+/// Testing / unused right now.
+// const InvalidIpAddr = error{ InvalidIpAddrV4, InvalidIpAddrV6 };
 
 /// Validate and consolidate param values that will become parts of the http request.
 /// Any possible bad values should be caught before being forwarded to api, to minimize wasted resources.
