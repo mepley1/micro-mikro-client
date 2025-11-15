@@ -4,8 +4,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const zli = @import("include/zli/src/root.zig");
 
-const funcs = @import("functions.zig");
 const b64 = @import("b64.zig");
+const funcs = @import("functions.zig");
+const input = @import("input.zig");
 const validation = @import("validation.zig");
 
 pub const IS_DEBUG = switch (builtin.mode) {
@@ -685,7 +686,7 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
             return error.InvalidUserName;
         }
 
-        const _pw: []const u8 = try funcs.getPassDispatch(alloc); // Prompt for pw
+        const _pw: []const u8 = try input.getPassDispatch(alloc); // Prompt for pw
 
         user = std.fmt.allocPrint(alloc, "{s}:{s}", .{ v, _pw[0.._pw.len] }) catch @panic("Out of memory!");
     }

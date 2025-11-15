@@ -2,11 +2,8 @@
 
 const std = @import("std");
 
-// Some various stdlib options for b64 table:
-const b64_table: []const u8 = &std.base64.standard_alphabet_chars;
-// const b64_table = &std.fs.base64_alphabet;
-// const b64_table = &std.base64.url_safe_alphabet_chars;
-// const b64_table: []const u8 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+pub const b64_table: []const u8 = &std.base64.standard_alphabet_chars;
+
 const pad: u8 = '=';
 
 /// Return a base64-encoded copy of `input`.
