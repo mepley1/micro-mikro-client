@@ -4,13 +4,14 @@ const std = @import("std");
 const builtin = @import("builtin");
 const zli = @import("include/zli/src/root.zig");
 
-const funcs = @import("functions.zig");
 const b64 = @import("b64.zig");
+const funcs = @import("functions.zig");
+const input = @import("input.zig");
 const validation = @import("validation.zig");
 
-const IS_DEBUG = switch (builtin.mode) {
-    .Debug, .ReleaseSafe => true,
-    .ReleaseFast, .ReleaseSmall => false,
+pub const IS_DEBUG = switch (builtin.mode) {
+    .Debug => true,
+    .ReleaseFast, .ReleaseSmall, .ReleaseSafe => false,
 };
 
 /// Body of the http request.
@@ -21,7 +22,7 @@ const Payload = struct {
     comment: []const u8 = "",
 };
 
-pub const arg_spec = [_]zli.Arg{
+const arg_spec = [_]zli.Arg{
     .{
         .name = .{ .long = .{ .full = "address", .short = 'a' } },
         .short_help = "(REQUIRED) IP address to append to address-list.",
@@ -120,6 +121,8 @@ const Cli = zli.CliCommand("micro-mikro-client", .{
     .version = app_ver,
 });
 
+const help_msg_args: []const u8 = "Missing required arguments. (--address, --auth, or --router)";
+
 pub fn main() !void {
 
     // Conditionally choose child allocator for arena
@@ -137,6 +140,13 @@ pub fn main() !void {
     };
     defer arena.deinit();
     const alloc = arena.allocator();
+
+    // If called with no args, print help + return
+    const num_args: usize = try getNumArgs(alloc);
+    if (num_args <= 1) {
+        try Cli.printHelp();
+        return;
+    }
 
     // Parse CLI args (zli)
     const parse_result = Cli.parse(alloc) catch |err| {
@@ -159,6 +169,10 @@ pub fn main() !void {
     // If --router and [--auth OR --user] weren't both given, read static config. (or skip if --ignore-config)
     var configs: *ConfigData = try alloc.create(ConfigData);
     configs.* = ConfigData{};
+    defer {
+        configs.cleanup(alloc);
+        alloc.destroy(configs);
+    }
     if (!params.options.@"ignore-config") {
         @branchHint(.likely);
         if ((params.options.router == null) or (params.options.auth == null and params.options.user == null)) {
@@ -170,15 +184,12 @@ pub fn main() !void {
         @branchHint(.unlikely);
         if (IS_DEBUG) std.log.debug("Option: --ignore-config.", .{});
     }
-    defer {
-        configs.cleanup(alloc);
-        alloc.destroy(configs);
-    }
 
-    // Check that all required params (or config) were given.
-    if (!try checkReqdArgs(params, configs)) {
-        std.log.err("Missing one of: --address, --router, --auth", .{});
-        try Cli.printHelp();
+    // Check that all required params (or config) were given before continuing.
+    if (!try ensureReqdArgs(params, configs)) {
+        std.log.err(help_msg_args, .{});
+        // try Cli.printHelp();
+        return error.MissingRequiredParams;
     }
 
     // Validate + consolidate params
@@ -547,16 +558,13 @@ const Options = struct {
     port: ?u16,
 };
 
-/// Testing / unused right now.
-const InvalidIpAddr = error{ InvalidIpAddrV4, InvalidIpAddrV6 };
-
 /// Verify all required args were given; if any one missing, return `false`.
-fn checkReqdArgs(params: anytype, configs: *ConfigData) !bool {
-    const x_addr = params.options.address != null;
-    const x_router = params.options.router != null or configs.*.router != null;
-    const x_auth = params.options.auth != null or configs.*.auth != null;
+fn ensureReqdArgs(params: anytype, configs: *ConfigData) !bool {
+    const x_addr: bool = params.options.address != null;
+    const x_router: bool = params.options.router != null or configs.*.router != null;
+    const x_auth: bool = params.options.auth != null or configs.*.auth != null;
 
-    const statii = [_]bool{ x_addr, x_router, x_auth };
+    const statii: [3]bool = [_]bool{ x_addr, x_router, x_auth };
 
     for (statii) |exists| {
         if (!exists) {
@@ -565,6 +573,22 @@ fn checkReqdArgs(params: anytype, configs: *ConfigData) !bool {
     }
     return true;
 }
+
+/// Args that are *required* for program to function.
+/// Real world: (n * 2) + 1
+// const num_reqd_args = 3;
+
+/// Return num of args passed to program.
+fn getNumArgs(alloc: std.mem.Allocator) (error{ OutOfMemory, Overflow } || std.fs.File.Writer.Error)!usize {
+    const kwargs = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, kwargs);
+    const n = kwargs.len;
+
+    return n;
+}
+
+/// Testing / unused right now.
+// const InvalidIpAddr = error{ InvalidIpAddrV4, InvalidIpAddrV6 };
 
 /// Validate and consolidate param values that will become parts of the http request.
 /// Any possible bad values should be caught before being forwarded to api, to minimize wasted resources.
@@ -662,7 +686,7 @@ fn validateParams(alloc: std.mem.Allocator, params: anytype) !Options {
             return error.InvalidUserName;
         }
 
-        const _pw: []const u8 = try funcs.getPassDispatch(alloc); // Prompt for pw
+        const _pw: []const u8 = try input.getPassDispatch(alloc); // Prompt for pw
 
         user = std.fmt.allocPrint(alloc, "{s}:{s}", .{ v, _pw[0.._pw.len] }) catch @panic("Out of memory!");
     }
