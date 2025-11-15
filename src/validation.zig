@@ -2,12 +2,12 @@
 
 const std = @import("std");
 
-const base64_table: []const u8 = &std.base64.standard_alphabet_chars;
+const B64_TABLE: []const u8 = @import("b64.zig").b64_table;
 
 /// Check if input slice is "probably" b64-encoded data (or at least, it's not an un-encoded HTTP basic auth str).
 /// This won't catch everything, for example "1234" or "abcd" will pass. For the use case, it's plenty - this is just for convenience, to allow passing an un-encoded auth str and encode it automatically.
 pub fn validateB64(s: []const u8) bool {
-    const valid_chars: []const u8 = base64_table ++ "=";
+    const valid_chars: []const u8 = B64_TABLE ++ "=";
     if (s.len % 4 != 0) {
         return false;
     }

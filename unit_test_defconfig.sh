@@ -14,10 +14,11 @@ MICROMIKRO_ROUTER=router.lan
 MICROMIKRO_AUTH="dXNlcjpwdw=="
 
 # Aliased Zig bin. Change name if necessary.
-zig-0.14.0 test src/main.zig
-zig-0.14.0 test src/b64.zig
-zig-0.14.0 test src/functions.zig
-zig-0.14.0 test src/validation.zig
+zig-0.14.1 test src/main.zig
+zig-0.14.1 test src/b64.zig
+zig-0.14.1 test src/functions.zig
+zig-0.14.1 test src/input.zig
+zig-0.14.1 test src/validation.zig
 
-
+# Replace original conf file
 mv "/home/$(whoami)/.config/micro-mikro-client/.env.json.temp" "/home/$(whoami)/.config/micro-mikro-client/.env.json"
